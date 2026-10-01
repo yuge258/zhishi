@@ -5,6 +5,7 @@ cd /d "%~dp0"
 
 set "ROOT=%CD%"
 set "HF=%ROOT%\hyperframes"
+set "WORK=%ROOT%\workspace"
 set "LOGDIR=%ROOT%\diagnostics"
 set "LOG=%LOGDIR%\studio-latest.log"
 
@@ -15,14 +16,16 @@ if not exist "%HF%\package.json" (
   exit /b 1
 )
 
+if not exist "%WORK%" mkdir "%WORK%"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
 >"%LOG%" echo ===== HyperFrames Studio 启动日志 %date% %time% =====
 
 echo.
 echo ========================================================
 echo   HyperFrames 官方原版 - 一键启动
-echo   原版源码目录：hyperframes\
-echo   本脚本不会修改官方源码文件
+echo   原版源码：hyperframes\
+echo   视频项目：workspace\
+echo   本脚本不会改动官方源码文件
 echo ========================================================
 echo.
 
@@ -31,7 +34,7 @@ call :EnsureNode || goto :FAIL
 call :EnsureBun || goto :FAIL
 call :EnsureFFmpeg || goto :FAIL
 
-echo [1/3] 环境检查完成。
+echo [1/5] 环境检查完成。
 (
   echo Git:
   git --version
@@ -43,7 +46,7 @@ echo [1/3] 环境检查完成。
   ffmpeg -version 2^>nul | findstr /B /C:"ffmpeg version"
 ) >> "%LOG%" 2>&1
 
-echo [2/3] 检查官方源码依赖...
+echo [2/5] 检查官方源码依赖...
 cd /d "%HF%"
 bun install --frozen-lockfile >> "%LOG%" 2>&1
 if errorlevel 1 (
@@ -52,12 +55,38 @@ if errorlevel 1 (
   if errorlevel 1 goto :FAIL
 )
 
-echo [3/3] 启动 HyperFrames Studio...
-echo 浏览器地址：http://127.0.0.1:5173
+echo [3/5] 准备官方 HyperFrames Core Skills...
+cd /d "%WORK%"
+call npx --yes hyperframes skills update >> "%LOG%" 2>&1
+if errorlevel 1 (
+  echo [提示] Core Skills 自动更新失败，Studio 仍会启动。详细信息已写入日志。
+)
+
+echo [4/5] 检查 HyperFrames 渲染 Chrome...
+call npx --yes hyperframes browser ensure >> "%LOG%" 2>&1
+if errorlevel 1 (
+  echo [提示] 渲染 Chrome 自动准备失败。Studio 仍会启动；需要渲染时可查看日志或运行 doctor。
+)
+
+echo [5/5] 启动 HyperFrames Studio...
+echo Studio 地址：http://127.0.0.1:5173
+echo.
+if exist "%WORK%\README.md" echo 生成的视频项目建议放在 workspace 目录。
+where codex >nul 2>&1
+if not errorlevel 1 (
+  echo 已检测到 Codex，同时打开一个 HyperFrames 工作区终端。
+  start "HyperFrames - Codex" cmd /k "cd /d ""%WORK%"" && codex"
+) else (
+  echo 未检测到 Codex CLI；不影响 Studio 启动。
+  echo 需要 AI 自动生成视频时，可在 workspace 目录用 Codex/Claude Code 打开。
+)
+echo.
 echo 这个黑色窗口不要关；关闭它就会停止 Studio。
+echo 启动日志：%LOG%
 echo.
 
 start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 4; Start-Process 'http://127.0.0.1:5173'"
+cd /d "%HF%"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "& { bun run dev 2>&1 | Tee-Object -FilePath '%LOG%' -Append }"
 exit /b %errorlevel%
 
