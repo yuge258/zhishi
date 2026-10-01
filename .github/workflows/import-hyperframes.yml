@@ -1,6 +1,10 @@
 name: Import HyperFrames Original
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/import-hyperframes.yml'
   workflow_dispatch:
 
 permissions:
@@ -26,7 +30,6 @@ jobs:
           rsync -a --delete --exclude='.git/' "$tmpdir/hyperframes/" hyperframes/
           rm -rf "$tmpdir"
 
-          # Remove the previous project files from main while keeping this temporary importer.
           for item in .* *; do
             case "$item" in
               .|..|.git|.github|hyperframes) ;;
@@ -34,7 +37,6 @@ jobs:
             esac
           done
 
-          # Preserve only workflow files needed for the migration itself.
           mkdir -p .github/workflows
           find .github/workflows -maxdepth 1 -type f ! -name 'import-hyperframes.yml' -delete
 
