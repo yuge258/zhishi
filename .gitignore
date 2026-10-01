@@ -1,0 +1,11 @@
+# Local agent/plugin state created by the one-click launcher.
+# Keep the official source under hyperframes/ untouched and do not sync machine-specific installs.
+/workspace/.agents/
+/workspace/.claude/
+/workspace/.codex/
+/workspace/.cursor/
+/workspace/.gemini/
+/workspace/node_modules/
+
+# Temporary diagnostic files only; normal diagnostics are intentionally committed by the log-sync BAT.
+/diagnostics/*.tmp
