@@ -1,0 +1,224 @@
+name: Import Video TalkCraft
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/import-video-talkcraft.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone upstream repository completely
+        run: |
+          rm -rf /tmp/video-talkcraft
+          git clone --depth=1 https://github.com/Vincentwei1021/video-talkcraft.git /tmp/video-talkcraft
+
+      - name: Copy upstream files and add Windows one-click launcher
+        shell: bash
+        run: |
+          rsync -a --delete \
+            --exclude='.git' \
+            --exclude='.github/workflows/import-video-talkcraft.yml' \
+            /tmp/video-talkcraft/ ./
+
+          cat > '一键安装并启动.bat' <<'BAT'
+          @echo off
+          setlocal EnableExtensions EnableDelayedExpansion
+          chcp 65001 >nul
+          title Video TalkCraft 一键安装并启动
+          cd /d "%~dp0"
+          set "ROOT=%CD%"
+          set "WINGET_LINKS=%LOCALAPPDATA%\Microsoft\WinGet\Links"
+          if exist "%WINGET_LINKS%" set "PATH=%WINGET_LINKS%;%PATH%"
+
+          echo ============================================================
+          echo   Video TalkCraft - Windows 一键安装并启动
+          echo   第一次运行会自动安装依赖，之后双击会直接启动工作台。
+          echo ============================================================
+          echo.
+
+          where winget >nul 2>nul
+          if errorlevel 1 (
+            echo [错误] 未检测到 winget。请先安装/更新 Microsoft App Installer 后再运行。
+            pause
+            exit /b 1
+          )
+
+          call :EnsureNode || exit /b 1
+          call :EnsurePython || exit /b 1
+          call :EnsureFFmpeg || exit /b 1
+
+          echo.
+          echo [1/5] 安装 Python 依赖...
+          %PY_CMD% -m pip install --upgrade pip
+          if errorlevel 1 goto :fail
+          %PY_CMD% -m pip install zhconv pypinyin sherpa-onnx soundfile numpy requests python-dotenv
+          if errorlevel 1 goto :fail
+
+          echo.
+          echo [2/5] 安装 Remotion / React / 工作台依赖...
+          pushd "%ROOT%\runtime"
+          if exist package-lock.json (
+            call npm ci --no-audit --no-fund
+          ) else (
+            call npm install --no-audit --no-fund
+          )
+          if errorlevel 1 (
+            popd
+            goto :fail
+          )
+
+          echo.
+          echo [3/5] 准备 Remotion 无头浏览器...
+          call npx remotion browser ensure
+          if errorlevel 1 (
+            popd
+            goto :fail
+          )
+          popd
+
+          echo.
+          echo [4/5] 连接工作台共享依赖，并注册 Codex / Claude Skill...
+          if exist "%ROOT%\workbench\node_modules" rmdir /s /q "%ROOT%\workbench\node_modules" >nul 2>nul
+          mklink /J "%ROOT%\workbench\node_modules" "%ROOT%\runtime\node_modules" >nul 2>nul
+          if errorlevel 1 (
+            echo [警告] workbench\node_modules 创建目录联接失败，将改为独立安装。
+            pushd "%ROOT%\workbench"
+            call npm install --no-audit --no-fund
+            if errorlevel 1 (
+              popd
+              goto :fail
+            )
+            popd
+          )
+
+          if not exist "%USERPROFILE%\.codex\skills" mkdir "%USERPROFILE%\.codex\skills" >nul 2>nul
+          if not exist "%USERPROFILE%\.claude\skills" mkdir "%USERPROFILE%\.claude\skills" >nul 2>nul
+
+          if exist "%USERPROFILE%\.codex\skills\video-talkcraft" rmdir "%USERPROFILE%\.codex\skills\video-talkcraft" >nul 2>nul
+          mklink /J "%USERPROFILE%\.codex\skills\video-talkcraft" "%ROOT%" >nul 2>nul
+
+          if exist "%USERPROFILE%\.claude\skills\video-talkcraft" rmdir "%USERPROFILE%\.claude\skills\video-talkcraft" >nul 2>nul
+          mklink /J "%USERPROFILE%\.claude\skills\video-talkcraft" "%ROOT%" >nul 2>nul
+
+          echo.
+          echo [5/5] 启动 TalkCraft 动效工作台...
+          start "TalkCraft Workbench" cmd /k "cd /d ""%ROOT%\workbench"" && npm run dev -- --host 127.0.0.1"
+          timeout /t 4 /nobreak >nul
+          start "" "http://127.0.0.1:5199"
+
+          echo.
+          echo ============================================================
+          echo   已完成。
+          echo   工作台地址: http://127.0.0.1:5199
+          echo.
+          echo   在 Codex / Claude Code 里直接说：
+          echo   “用 video-talkcraft 把这份口播稿 + 配音做成知识讲解视频”
+          echo.
+          echo   提示：首次做字级时间戳时，FireRedASR2 模型会额外下载约 767MB。
+          echo ============================================================
+          echo.
+          pause
+          exit /b 0
+
+          :EnsureNode
+          where node >nul 2>nul
+          if not errorlevel 1 exit /b 0
+          echo [准备] 未检测到 Node.js，正在安装 Node.js LTS...
+          winget install --id OpenJS.NodeJS.LTS -e --accept-package-agreements --accept-source-agreements
+          set "PATH=%ProgramFiles%\nodejs;%WINGET_LINKS%;%PATH%"
+          where node >nul 2>nul
+          if errorlevel 1 (
+            echo [错误] Node.js 安装后当前窗口仍无法找到，请关闭本窗口后再次双击本 BAT。
+            pause
+            exit /b 1
+          )
+          exit /b 0
+
+          :EnsurePython
+          set "PY_CMD=python"
+          where python >nul 2>nul
+          if not errorlevel 1 exit /b 0
+          where py >nul 2>nul
+          if not errorlevel 1 (
+            set "PY_CMD=py -3"
+            exit /b 0
+          )
+          echo [准备] 未检测到 Python，正在安装 Python 3.12...
+          winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements
+          set "PATH=%LOCALAPPDATA%\Programs\Python\Python312;%LOCALAPPDATA%\Programs\Python\Python312\Scripts;%PATH%"
+          where python >nul 2>nul
+          if errorlevel 1 (
+            where py >nul 2>nul
+            if errorlevel 1 (
+              echo [错误] Python 安装后当前窗口仍无法找到，请关闭本窗口后再次双击本 BAT。
+              pause
+              exit /b 1
+            )
+            set "PY_CMD=py -3"
+          )
+          exit /b 0
+
+          :EnsureFFmpeg
+          where ffmpeg >nul 2>nul
+          if not errorlevel 1 exit /b 0
+          echo [准备] 未检测到 FFmpeg，正在安装...
+          winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements
+          set "PATH=%WINGET_LINKS%;%PATH%"
+          where ffmpeg >nul 2>nul
+          if errorlevel 1 (
+            echo [警告] FFmpeg 已请求安装，但当前窗口暂时未识别。若后续提示缺 FFmpeg，重新双击本 BAT 即可。
+          )
+          exit /b 0
+
+          :fail
+          echo.
+          echo [失败] 安装或启动过程中出现错误。请把本窗口最后 30 行截图发给我，我可以继续定位。
+          pause
+          exit /b 1
+          BAT
+
+          cat > '本地使用说明.md' <<'DOC'
+          # Video TalkCraft 本地使用
+
+          ## Windows 最简单用法
+          1. 下载或 `git clone` 本仓库到本地。
+          2. 双击 **`一键安装并启动.bat`**。
+          3. 第一次会自动准备 Node.js、Python、FFmpeg、Python 依赖、Remotion 依赖与浏览器。
+          4. 完成后会自动打开 TalkCraft Workbench：`http://127.0.0.1:5199`。
+          5. BAT 同时会把当前仓库注册到 Codex 与 Claude Code 的 skills 目录。
+
+          在 Codex / Claude Code 里可以直接说：
+
+          > 用 video-talkcraft 把我的口播稿和配音做成知识讲解视频。
+
+          ## 重要说明
+          Video TalkCraft 本质上是一个给 Codex / Claude Code 使用的 Agent Skill + Remotion 动效工作台，不是传统的“输入文案后点一个按钮就完全自动出片”的独立桌面软件。这个 BAT 做的是把它在 Windows 上需要的运行环境、Skill 注册和工作台启动尽量合并成一次双击。
+
+          原项目许可证为 PolyForm Noncommercial 1.0.0。个人、教育、研究用途免费；商业使用工具本身前请按原项目 LICENSE 联系作者授权。
+          DOC
+
+      - name: Commit imported project
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Import complete Video TalkCraft and add Windows one-click launcher'
+          git push origin HEAD:main
